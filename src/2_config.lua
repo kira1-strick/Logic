@@ -5,7 +5,7 @@
 ]]
 
 local Config = {
-    ConfigVersion = 2,
+    ConfigVersion = 3,
 
     Combat = {
         AutoAttack = false, AutoRush = false, AutoFollow = false,
