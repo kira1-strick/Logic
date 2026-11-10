@@ -1,6 +1,6 @@
 --[[
 ============================================================
-  [8] LOGIC — Command An Army (v2.7)
+  [8] LOGIC — Command An Army (v2.7 FINAL)
 ============================================================
 ]]
 
@@ -77,21 +77,31 @@ end)
 addConn(Run.RenderStepped:Connect(function()
     local hum = getHum()
     if not hum then return end
+
     local mv = Config.Movement
-    if not Config or not Config.Movement then return end
+    if not mv then return end
 
     if mv.EnableRunSpeed then
+        
         if mv.WalkSpeed and mv.WalkSpeed > 0 and hum.WalkSpeed ~= mv.WalkSpeed then
             hum.WalkSpeed = mv.WalkSpeed
+        end
+        lastEnableSpeed = true
+    else
+        
+        if lastEnableSpeed then
+            hum.WalkSpeed = 16
+            lastEnableSpeed = false
         end
     end
 
     if mv.JumpPower and mv.JumpPower > 0 then
         hum.UseJumpPower = true
-        if hum.JumpPower ~= mv.JumpPower then hum.JumpPower = mv.JumpPower end
+        if hum.JumpPower ~= mv.JumpPower then 
+            hum.JumpPower = mv.JumpPower 
+        end
     end
 end))
-
 -- ============================================================
 -- NOCLIP
 -- ============================================================
@@ -441,12 +451,16 @@ end
 
 task.spawn(function()
     while task.wait(0.5) do
+        local toRemove = {}
+
         if Config.Visual.Chams then
             local myChar, myHRP = getChar(), getHRP()
             local anySetting = Config.Visual.ESPShowDistance or Config.Visual.ESPHealth or Config.Visual.ESPName
 
-            for _, model in pairs(workspace:GetChildren()) do
-                if model ~= myChar and model:IsA("Model") then
+            for _, player in pairs(Players:GetPlayers()) do
+                local model = player.Character
+                
+                if model and model ~= myChar and model:IsA("Model") then
                     local hum = model:FindFirstChildOfClass("Humanoid")
                     if hum and hum.Health > 0 then
                         local hrp = model:FindFirstChild("HumanoidRootPart")
@@ -505,25 +519,25 @@ task.spawn(function()
                     end
                 end
             end
-            for model, objs in pairs(espCache) do
-                if not model.Parent or not model:FindFirstChildOfClass("Humanoid") then
+        end
+
+        -- BERSIHIN ESP PLAYER (ANTI-CRASH)
+        for model, objs in pairs(espCache) do
+            if not objs.isObject then
+                if not model.Parent or not model:FindFirstChildOfClass("Humanoid") or not Config.Visual.Chams then
                     for _, obj in pairs(objs) do
                         if obj and typeof(obj) == "Instance" then pcall(function() obj:Destroy() end) end
                     end
-                    espCache[model] = nil
-                end
-            end
-        else
-            for model, objs in pairs(espCache) do
-                if not objs.isObject then
-                    for _, obj in pairs(objs) do
-                        if obj and typeof(obj) == "Instance" then pcall(function() obj:Destroy() end) end
-                    end
-                    espCache[model] = nil
+                    table.insert(toRemove, model)
                 end
             end
         end
+        
+        for _, model in ipairs(toRemove) do
+            espCache[model] = nil
+        end
 
+        -- ESP SUPPLY & CAPTURE
         local mapFolder = getMapFolder()
         if mapFolder then
             local inter = mapFolder:FindFirstChild("Interactable")
@@ -544,15 +558,14 @@ task.spawn(function()
                                     hl.Parent = espGuiParent
                                     espCache[obj].hl = hl
                                 end
-                            else
-                                if espCache[obj] and espCache[obj].isObject then
-                                    if espCache[obj].hl then pcall(function() espCache[obj].hl:Destroy() end) end
-                                    espCache[obj] = nil
-                                end
+                            elseif espCache[obj] and espCache[obj].isObject then
+                                if espCache[obj].hl then pcall(function() espCache[obj].hl:Destroy() end) end
+                                espCache[obj] = nil
                             end
                         end
                     end
                 end
+
                 local points = inter:FindFirstChild("Points")
                 if points then
                     for _, obj in pairs(points:GetChildren()) do
@@ -569,11 +582,9 @@ task.spawn(function()
                                     hl.Parent = espGuiParent
                                     espCache[obj].hl = hl
                                 end
-                            else
-                                if espCache[obj] and espCache[obj].isObject then
-                                    if espCache[obj].hl then pcall(function() espCache[obj].hl:Destroy() end) end
-                                    espCache[obj] = nil
-                                end
+                            elseif espCache[obj] and espCache[obj].isObject then
+                                if espCache[obj].hl then pcall(function() espCache[obj].hl:Destroy() end) end
+                                espCache[obj] = nil
                             end
                         end
                     end
