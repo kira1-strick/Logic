@@ -74,6 +74,8 @@ end)
 -- ============================================================
 -- MOVEMENT
 -- ============================================================
+local lastEnableSpeed = false
+
 addConn(Run.RenderStepped:Connect(function()
     local hum = getHum()
     if not hum then return end
