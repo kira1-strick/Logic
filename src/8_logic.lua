@@ -314,16 +314,35 @@ end)
 -- ============================================================
 -- AUTO HEAL
 -- ============================================================
-local healCD = 0
+local lastHeal = 0
+local healRemote = Remotes and Remotes:FindFirstChild("PlayerCombatRequest")
+
 task.spawn(function()
     while task.wait(0.5) do
         if Config.Combat.AutoHeal then
             local hum = getHum()
             if hum and hum.Health > 0 then
                 local pct = (hum.Health / hum.MaxHealth) * 100
-                if pct <= Config.Combat.HealThreshold and tick() - healCD >= 2.5 then
-                    healCD = tick()
-                    sendKey(Enum.KeyCode.H, 0.05)
+                
+                if pct <= Config.Combat.HealThreshold then
+                    
+                    if LP:GetAttribute("CanUseCombat") == true then
+                        
+                        local cdEnds = tonumber(LP:GetAttribute("HealCooldownEndsAt")) or 0
+                        if cdEnds <= workspace:GetServerTimeNow() then
+                            
+                            if tick() - lastHeal >= 1.5 then
+                                
+                                if healRemote then
+                                    pcall(function()
+                                        healRemote:FireServer("Heal")
+                                    end)
+                                    lastHeal = tick()
+                                end
+                                
+                            end
+                        end
+                    end
                 end
             end
         end
@@ -879,51 +898,110 @@ task.spawn(function()
 end)
 
 -- LOOP AUTO ASCEND
-task.spawn(function()
-    while task.wait(5) do
-        local AA = Config.Automation
-        if not AA.AutoAscend then continue end
-        
-        local prompt = nil
-        for _, obj in pairs(workspace:GetDescendants()) do
-            if obj:IsA("ProximityPrompt") and obj.Parent and obj.Parent.Name == "Ascension" then
-                prompt = obj
-                break
+local function readAttributeJSON(part, attrName)
+    local raw = part:GetAttribute(attrName)
+    if type(raw) ~= "string" then return {} end
+    local ok, decoded = pcall(HttpService.JSONDecode, HttpService, raw)
+    if ok and type(decoded) == "table" then return decoded end
+    return {}
+end
+
+local function doAutoAscend()
+    local inventory = readAttributeJSON(LP, "UnitsInventory")
+    local units     = inventory.Units     or {}
+    local loadout   = inventory.Loadout   or {}
+    local favorites = inventory.Favorites or {}
+
+    local usedCopyIds = {}
+    for _, entry in ipairs(loadout) do
+        usedCopyIds[entry.CopyId] = true
+    end
+
+    local groups = {}
+    for _, unit in ipairs(units) do
+        local ascLevel = tonumber(unit.AscensionLevel) or 0
+        if ascLevel < 3 then
+            local key = tostring(unit.TroopId) .. ":" .. tostring(ascLevel)
+            groups[key] = groups[key] or {}
+            table.insert(groups[key], unit)
+        end
+    end
+
+    local AscensionRequest = Remotes and Remotes:FindFirstChild("AscensionRequest")
+    if not AscensionRequest then return false end
+
+    for _, group in pairs(groups) do
+        if #group >= 2 then
+            table.sort(group, function(a, b)
+                return (tonumber(a.MasteryLevel) or 0) > (tonumber(b.MasteryLevel) or 0)
+            end)
+
+            local receiver  = group[1]
+            local sacrifice = nil
+
+            for i = 2, #group do
+                local candidate = group[i]
+                local isUsed     = usedCopyIds[candidate.CopyId]
+                local isFavorite = favorites[candidate.CopyId] == true
+
+                if not isUsed and not isFavorite then
+                    sacrifice = candidate
+                    break
+                end
+            end
+
+            if sacrifice then
+                pcall(function()
+                    AscensionRequest:FireServer({
+                        RequestId       = HttpService:GenerateGUID(false),
+                        MainCopyId      = receiver.CopyId,
+                        DuplicateCopyId = sacrifice.CopyId,
+                    })
+                end)
+                return true 
             end
         end
-        
-        if prompt then
-            pcall(function()
-                if fireproximityprompt then fireproximityprompt(prompt)
-                else prompt:InputHoldBegin() task.wait(0.1) prompt:InputHoldEnd() end
-            end)
-            task.wait(1.5)
-            
-            local PG = LP:FindFirstChild("PlayerGui")
-            local interactable = PG and PG:FindFirstChild("Interactable")
-            local ascUI = interactable and interactable:FindFirstChild("AscensionUI")
-            
-            if ascUI and ascUI.Visible then
-                local allBtn = ascUI:FindFirstChild("AscendAllTroops")
-                if allBtn and allBtn.Visible then
-                    pcall(function() if firesignal then firesignal(allBtn.MouseButton1Click) else allBtn:Activate() end end)
-                    task.wait(0.5)
-                end
-                local exitBtn = ascUI:FindFirstChild("Exit")
-                if exitBtn then pcall(function() if firesignal then firesignal(exitBtn.MouseButton1Click) else exitBtn:Activate() end end) end
-            end
+    end
+    return false
+end
+
+task.spawn(function()
+    while task.wait(2) do 
+        if Config.Automation and Config.Automation.AutoAscend then
+            doAutoAscend()
         end
     end
 end)
 
 -- LOOP AUTO EVOLVE
+local function doAutoEvolve()
+    local inventory = readAttributeJSON(LP, "UnitsInventory")
+    local units     = inventory.Units or {}
+
+    local EvolutionRequest = Remotes and Remotes:FindFirstChild("EvolutionRequest")
+    if not EvolutionRequest then return false end
+
+    for _, unit in ipairs(units) do
+        local hasEvolution = type(unit.EvolutionPreview) == "table"
+        local masteryLevel = tonumber(unit.MasteryLevel) or 0
+
+        if hasEvolution and masteryLevel >= 20 then
+            pcall(function()
+                EvolutionRequest:FireServer({
+                    RequestId = HttpService:GenerateGUID(false),
+                    CopyId    = unit.CopyId,
+                })
+            end)
+            return true
+        end
+    end
+    return false
+end
+
 task.spawn(function()
-    while task.wait(5) do
-        local AA = Config.Automation
-        if not AA.AutoEvolve then continue end
-        local EvolutionRequest = Remotes and Remotes:FindFirstChild("EvolutionRequest")
-        if EvolutionRequest then
-            pcall(function() EvolutionRequest:FireServer("EvolveAllDuplicates") end)
+    while task.wait(2) do
+        if Config.Automation and Config.Automation.AutoEvolve then
+            doAutoEvolve()
         end
     end
 end)
@@ -1106,77 +1184,50 @@ function _G.STHAIN.GetMyTeam()
     return "unknown"
 end
 
-local function godmodeOn()
-    local char = getChar()
-    if not char then return nil end
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if not hum then return nil end
-    local original = { MaxHealth = hum.MaxHealth, Health = hum.Health }
-    local GOD_HP = 1000000
-    pcall(function()
-        hum.MaxHealth = GOD_HP
-        hum.Health = GOD_HP
-    end)
-    local lockConn = Run.Stepped:Connect(function()
-        if hum and hum.Parent then
-            pcall(function()
-                if hum.MaxHealth < GOD_HP then hum.MaxHealth = GOD_HP end
-                if hum.Health < GOD_HP then hum.Health = GOD_HP end
-            end)
-        end
-    end)
-    return {
-        restore = function()
-            if lockConn then lockConn:Disconnect() end
-            if hum and hum.Parent then
-                pcall(function()
-                    hum.MaxHealth = original.MaxHealth
-                    hum.Health = original.MaxHealth
-                end)
-            end
-        end
-    }
-end
+local fallTimer = nil
 
 function _G.STHAIN.TeleportTo(part)
     local char = getChar()
     if not char then return false end
     local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not (hrp and part) then return false end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not (hrp and hum and part) then return false end
+
     local targetPos
-    if typeof(part) == "Vector3" then targetPos = part
+    if typeof(part) == "Vector3" then 
+        targetPos = part
     else
         if not part.Parent then return false end
         targetPos = part.Position
     end
+    
     local offY = (Config.Teleport and Config.Teleport.OffsetY) or 5
-    local god = godmodeOn()
-    local savedCollide = {}
-    for _, p in pairs(char:GetDescendants()) do
-        if p:IsA("BasePart") then
-            savedCollide[p] = p.CanCollide
-            p.CanCollide = false
-        end
-    end
+
     pcall(function()
+        hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+        hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+    end)
+
+    pcall(function()
+        
         hrp.Velocity = Vector3.zero
         hrp.RotVelocity = Vector3.zero
-    end)
-    pcall(function()
+        
         hrp.CFrame = CFrame.new(targetPos + Vector3.new(0, offY, 0))
     end)
-    task.wait(1.5)
-    pcall(function()
-        hrp.Velocity = Vector3.zero
-        hrp.RotVelocity = Vector3.zero
-    end)
-    task.wait(1)
-    for p, cc in pairs(savedCollide) do
-        if p and p.Parent then
-            pcall(function() p.CanCollide = cc end)
-        end
+
+    if fallTimer then 
+        task.cancel(fallTimer) 
     end
-    if god then god.restore() end
+    
+    fallTimer = task.delay(0.2, function()
+        pcall(function()
+            hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
+            hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, true)
+        end)
+        fallTimer = nil
+    end)
+
     return true
 end
 
